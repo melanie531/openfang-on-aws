@@ -2,12 +2,16 @@ import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
+import * as cw_actions from "aws-cdk-lib/aws-cloudwatch-actions";
+import * as logs from "aws-cdk-lib/aws-logs";
+import * as sns from "aws-cdk-lib/aws-sns";
 import * as fs from "fs";
 import * as path from "path";
 
 export class OpenFangStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
-    super(scope, id, props);
+    super(scope, id, { ...props, terminationProtection: true });
 
     // ── Context variables ──────────────────────────────────────────
     const existingVpcId = this.node.tryGetContext("vpcId") as
@@ -17,6 +21,14 @@ export class OpenFangStack extends cdk.Stack {
       (this.node.tryGetContext("instanceType") as string) ?? "t3.xlarge";
     const bedrockRegion =
       (this.node.tryGetContext("bedrockRegion") as string) ?? "us-west-2";
+
+    // ── Alert email parameter ────────────────────────────────────
+    const alertEmailParam = new cdk.CfnParameter(this, "AlertEmail", {
+      type: "String",
+      description:
+        "Email address for CloudWatch alarm notifications (leave empty to skip)",
+      default: "",
+    });
 
     // ── VPC: create new or use existing ────────────────────────────
     let vpc: ec2.IVpc;
@@ -42,6 +54,30 @@ export class OpenFangStack extends cdk.Stack {
         ],
       });
     }
+
+    // ── VPC Flow Logs ──────────────────────────────────────────────
+    const flowLogGroup = new logs.LogGroup(this, "VpcFlowLogGroup", {
+      logGroupName: "/openfang/vpc-flow-logs",
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    const flowLogRole = new iam.Role(this, "VpcFlowLogRole", {
+      assumedBy: new iam.ServicePrincipal("vpc-flow-logs.amazonaws.com"),
+      description:
+        "IAM role for VPC Flow Logs to publish to CloudWatch Logs",
+    });
+
+    flowLogGroup.grantWrite(flowLogRole);
+
+    new ec2.FlowLog(this, "VpcFlowLog", {
+      resourceType: ec2.FlowLogResourceType.fromVpc(vpc),
+      trafficType: ec2.FlowLogTrafficType.ALL,
+      destination: ec2.FlowLogDestination.toCloudWatchLogs(
+        flowLogGroup,
+        flowLogRole
+      ),
+    });
 
     // ── Security Group ─────────────────────────────────────────────
     const sg = new ec2.SecurityGroup(this, "OpenFangSg", {
@@ -146,6 +182,58 @@ export class OpenFangStack extends cdk.Stack {
       "MetadataOptions.HttpPutResponseHopLimit",
       2
     );
+
+    // ── SNS Topic for Alerts ────────────────────────────────────────
+    const alertTopic = new sns.Topic(this, "OpenFangAlerts", {
+      topicName: "OpenFangAlerts",
+      displayName: "OpenFang Alerts",
+    });
+
+    // ── CloudWatch Alarm: StatusCheckFailed ──────────────────────────
+    const statusCheckAlarm = new cloudwatch.Alarm(
+      this,
+      "StatusCheckFailedAlarm",
+      {
+        alarmName: "OpenFang-StatusCheckFailed",
+        alarmDescription: "EC2 instance status check has failed",
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/EC2",
+          metricName: "StatusCheckFailed",
+          dimensionsMap: {
+            InstanceId: instance.instanceId,
+          },
+          period: cdk.Duration.seconds(60),
+          statistic: "Maximum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 2,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+      }
+    );
+    statusCheckAlarm.addAlarmAction(new cw_actions.SnsAction(alertTopic));
+
+    // ── CloudWatch Alarm: High CPU ──────────────────────────────────
+    const cpuAlarm = new cloudwatch.Alarm(this, "HighCpuAlarm", {
+      alarmName: "OpenFang-HighCPU",
+      alarmDescription: "EC2 CPU utilization exceeds 80 percent",
+      metric: new cloudwatch.Metric({
+        namespace: "AWS/EC2",
+        metricName: "CPUUtilization",
+        dimensionsMap: {
+          InstanceId: instance.instanceId,
+        },
+        period: cdk.Duration.seconds(300),
+        statistic: "Average",
+      }),
+      threshold: 80,
+      evaluationPeriods: 3,
+      comparisonOperator:
+        cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.MISSING,
+    });
+    cpuAlarm.addAlarmAction(new cw_actions.SnsAction(alertTopic));
 
     // ── Tags ───────────────────────────────────────────────────────
     cdk.Tags.of(instance).add("Project", "openfang");

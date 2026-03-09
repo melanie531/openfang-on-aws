@@ -38,11 +38,11 @@ sed -i '/apt-get install -y ca-certificates/s/ca-certificates/ca-certificates py
   source/Dockerfile
 
 # -- 4. Generate secrets -------------------------------------------
-OPENFANG_API_KEY=$(openssl rand -hex 32)
-LITELLM_KEY="sk-litellm-openfang-internal"
+OF_API_KEY=$(openssl rand -hex 32)
+LITELLM_KEY=$(openssl rand -hex 32)
 
 # -- 5. LiteLLM config --------------------------------------------
-cat > litellm_config.yaml << 'LITELLM_EOF'
+cat > litellm_config.yaml << LITELLM_EOF
 model_list:
   - model_name: "bedrock/anthropic.claude-sonnet-4-6"
     litellm_params:
@@ -62,12 +62,12 @@ model_list:
       aws_region_name: "us-west-2"
 
 general_settings:
-  master_key: "sk-litellm-openfang-internal"
+  master_key: "${LITELLM_KEY}"
 LITELLM_EOF
 
 # -- 6. OpenFang config -------------------------------------------
 cat > config.toml << OPENFANG_EOF
-api_key = "${OPENFANG_API_KEY}"
+api_key = "${OF_API_KEY}"
 
 [default_model]
 provider = "bedrock"
@@ -83,7 +83,7 @@ listen_addr = "0.0.0.0:4200"
 OPENFANG_EOF
 
 # -- 7. Docker Compose ---------------------------------------------
-cat > docker-compose.yml << 'COMPOSE_EOF'
+cat > docker-compose.yml << COMPOSE_EOF
 services:
   openfang:
     build: ./source
@@ -93,7 +93,7 @@ services:
       - openfang-data:/data
       - ./config.toml:/data/config.toml:ro
     environment:
-      - LITELLM_API_KEY=sk-litellm-openfang-internal
+      - LITELLM_API_KEY=${LITELLM_KEY}
     depends_on:
       litellm:
         condition: service_started
@@ -104,7 +104,7 @@ services:
           memory: 2G
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-latest
+    image: ghcr.io/berriai/litellm:main-v1.65.0
     ports:
       - "127.0.0.1:4000:4000"
     volumes:
@@ -112,7 +112,7 @@ services:
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
       - AWS_DEFAULT_REGION=us-west-2
-      - LITELLM_MASTER_KEY=sk-litellm-openfang-internal
+      - LITELLM_MASTER_KEY=${LITELLM_KEY}
     restart: unless-stopped
     deploy:
       resources:
@@ -128,7 +128,7 @@ docker compose up -d --build
 
 # -- 9. Persist API key for operator reference ---------------------
 cat > /opt/openfang/.env << ENV_EOF
-OPENFANG_API_KEY=${OPENFANG_API_KEY}
+OF_API_KEY=${OF_API_KEY}
 ENV_EOF
 chmod 600 /opt/openfang/.env
 
