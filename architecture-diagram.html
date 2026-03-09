@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin: 0; background: white; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1200" height="800"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+
+// Colors
+const COLORS = {
+  bg: '#FFFFFF',
+  vpc: '#E8F4FD',
+  publicSub: '#FFF3E0',
+  privateSub: '#E8F5E9',
+  border: '#37474F',
+  aws: '#232F3E',
+  awsOrange: '#FF9900',
+  ec2: '#ED7100',
+  nat: '#8C4FFF',
+  ssm: '#DD344C',
+  bedrock: '#01A88D',
+  iam: '#DD344C',
+  litellm: '#4FC3F7',
+  openfang: '#7C4DFF',
+  text: '#263238',
+  lightText: '#546E7A',
+  arrow: '#607D8B',
+  sg: '#EF5350'
+};
+
+// Background
+ctx.fillStyle = COLORS.bg;
+ctx.fillRect(0, 0, 1200, 800);
+
+// Title
+ctx.fillStyle = COLORS.aws;
+ctx.font = 'bold 24px Arial';
+ctx.fillText('OpenFang on AWS — Secure Deployment Architecture', 30, 40);
+ctx.fillStyle = COLORS.lightText;
+ctx.font = '14px Arial';
+ctx.fillText('Amazon Bedrock + LiteLLM Proxy + SSM Session Manager | us-west-2', 30, 62);
+
+// AWS Cloud box
+ctx.strokeStyle = COLORS.awsOrange;
+ctx.lineWidth = 3;
+ctx.setLineDash([]);
+roundRect(ctx, 20, 80, 1160, 700, 12);
+ctx.stroke();
+ctx.fillStyle = COLORS.awsOrange;
+ctx.font = 'bold 14px Arial';
+ctx.fillText('☁ AWS Cloud (us-west-2)', 40, 100);
+
+// VPC box
+ctx.strokeStyle = '#1565C0';
+ctx.lineWidth = 2;
+roundRect(ctx, 50, 115, 700, 640, 10);
+ctx.stroke();
+ctx.fillStyle = '#1565C0';
+ctx.font = 'bold 13px Arial';
+ctx.fillText('VPC (10.0.0.0/16)', 70, 135);
+
+// Public Subnet
+ctx.fillStyle = COLORS.publicSub;
+roundRect(ctx, 70, 150, 310, 250, 8);
+ctx.fill();
+ctx.strokeStyle = '#E65100';
+ctx.lineWidth = 1.5;
+roundRect(ctx, 70, 150, 310, 250, 8);
+ctx.stroke();
+ctx.fillStyle = '#E65100';
+ctx.font = 'bold 12px Arial';
+ctx.fillText('Public Subnet (10.0.0.0/24)', 90, 172);
+
+// NAT Gateway in public subnet
+drawBox(ctx, 120, 200, 200, 70, '#8C4FFF', 'NAT Gateway', '🌐 Outbound Internet');
+
+// Internet Gateway
+drawBox(ctx, 120, 310, 200, 55, '#E65100', 'Internet Gateway', 'igw-xxx');
+
+// Private Subnet
+ctx.fillStyle = COLORS.privateSub;
+roundRect(ctx, 70, 420, 660, 320, 8);
+ctx.fill();
+ctx.strokeStyle = '#2E7D32';
+ctx.lineWidth = 1.5;
+roundRect(ctx, 70, 420, 660, 320, 8);
+ctx.stroke();
+ctx.fillStyle = '#2E7D32';
+ctx.font = 'bold 12px Arial';
+ctx.fillText('Private Subnet (10.0.128.0/24) — No Public IP', 90, 442);
+
+// EC2 Instance
+ctx.fillStyle = '#FFF8E1';
+roundRect(ctx, 100, 460, 600, 260, 8);
+ctx.fill();
+ctx.strokeStyle = COLORS.ec2;
+ctx.lineWidth = 2;
+roundRect(ctx, 100, 460, 600, 260, 8);
+ctx.stroke();
+ctx.fillStyle = COLORS.ec2;
+ctx.font = 'bold 13px Arial';
+ctx.fillText('EC2 t3.xlarge (16GB RAM + 4GB Swap)', 120, 483);
+ctx.fillStyle = COLORS.lightText;
+ctx.font = '11px Arial';
+ctx.fillText('Amazon Linux 2023 | IMDSv2 | gp3 Encrypted EBS', 120, 498);
+
+// OpenFang container
+drawBox(ctx, 130, 515, 250, 85, '#7C4DFF', 'OpenFang v0.3.33', 'Agent OS + Researcher Hand\nPort 50051 | network_mode: host');
+
+// LiteLLM container
+drawBox(ctx, 420, 515, 250, 85, '#0288D1', 'LiteLLM Proxy', 'OpenAI → Bedrock Bridge\nPort 4000 | Docker');
+
+// Security Group
+ctx.setLineDash([6, 4]);
+ctx.strokeStyle = COLORS.sg;
+ctx.lineWidth = 1.5;
+roundRect(ctx, 95, 455, 610, 270, 6);
+ctx.stroke();
+ctx.setLineDash([]);
+ctx.fillStyle = COLORS.sg;
+ctx.font = '11px Arial';
+ctx.fillText('🔒 Security Group: 0 inbound rules | Outbound: 443, 80, 53 only', 120, 718);
+
+// Docker Compose label
+ctx.fillStyle = COLORS.lightText;
+ctx.font = 'italic 11px Arial';
+ctx.fillText('docker-compose.yml', 120, 628);
+
+// IAM Role
+drawBox(ctx, 130, 640, 250, 55, '#DD344C', 'IAM Instance Profile', 'Bedrock Invoke + SSM Core');
+
+// Memory/Data
+drawBox(ctx, 420, 640, 250, 55, '#6D4C41', 'Persistent Volume', 'SQLite + Agent Workspaces');
+
+// --- Right side: AWS Services ---
+
+// Amazon Bedrock
+drawBox(ctx, 820, 140, 320, 130, '#01A88D', 'Amazon Bedrock', 'Claude Sonnet 4.6\nCross-Region Inference Profiles\nus.anthropic.claude-sonnet-4-6\nIAM Auth (Instance Profile)');
+
+// SSM
+drawBox(ctx, 820, 310, 320, 90, '#DD344C', 'SSM Session Manager', 'Secure Shell Access\nNo SSH Keys | No Open Ports');
+
+// CloudWatch (optional)
+drawBox(ctx, 820, 440, 320, 70, '#FF6F00', 'AWS CloudWatch', 'Logs + Metrics');
+
+// User/Operator
+drawBox(ctx, 820, 570, 320, 80, '#37474F', '👤 Operator', 'aws ssm start-session\nPort Forward → localhost:4200');
+
+// --- Arrows ---
+ctx.setLineDash([]);
+ctx.lineWidth = 2;
+
+// OpenFang → LiteLLM
+drawArrow(ctx, 380, 558, 420, 558, '#607D8B');
+ctx.fillStyle = COLORS.lightText;
+ctx.font = '10px Arial';
+ctx.fillText('OpenAI API', 388, 548);
+
+// LiteLLM → NAT → Bedrock
+drawArrow(ctx, 545, 515, 545, 395, '#607D8B');
+drawArrow(ctx, 545, 395, 320, 270, '#607D8B');
+drawArrow(ctx, 320, 235, 380, 235, '#607D8B');
+drawArrow(ctx, 380, 235, 820, 200, '#01A88D');
+ctx.fillStyle = '#01A88D';
+ctx.font = '10px Arial';
+ctx.fillText('SigV4 signed requests', 550, 200);
+
+// NAT → IGW
+drawArrow(ctx, 220, 270, 220, 310, '#8C4FFF');
+
+// SSM → EC2
+drawArrow(ctx, 820, 355, 700, 500, '#DD344C');
+ctx.fillStyle = '#DD344C';
+ctx.font = '10px Arial';
+ctx.fillText('SSM Tunnel', 740, 420);
+
+// Operator → SSM
+drawArrow(ctx, 980, 570, 980, 400, '#37474F');
+
+// IAM → Bedrock (dotted)
+ctx.setLineDash([4, 4]);
+drawArrow(ctx, 380, 667, 820, 250, '#DD344C');
+ctx.setLineDash([]);
+ctx.fillStyle = '#DD344C';
+ctx.font = '10px Arial';
+ctx.fillText('IAM Auth', 600, 430);
+
+// Cost estimate
+ctx.fillStyle = COLORS.aws;
+ctx.font = 'bold 12px Arial';
+ctx.fillText('Monthly Cost: ~$75-85 (excl. Bedrock tokens)', 820, 690);
+ctx.fillStyle = COLORS.lightText;
+ctx.font = '11px Arial';
+ctx.fillText('EC2 t3.xlarge: ~$122 | NAT GW: ~$32 | EBS: ~$2', 820, 708);
+ctx.fillText('Consider t3.medium ($30/mo) after initial build', 820, 724);
+
+// Legend
+ctx.fillStyle = COLORS.text;
+ctx.font = 'bold 11px Arial';
+ctx.fillText('Zero Trust:', 820, 755);
+ctx.fillStyle = COLORS.lightText;
+ctx.font = '11px Arial';
+ctx.fillText('✓ No public IP  ✓ No SSH  ✓ No API keys', 890, 755);
+ctx.fillText('✓ IMDSv2 only  ✓ 0 inbound SG rules  ✓ Encrypted EBS', 820, 772);
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawBox(ctx, x, y, w, h, color, title, subtitle) {
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  roundRect(ctx, x+2, y+2, w, h, 6);
+  ctx.fill();
+  // Box
+  ctx.fillStyle = color + '15';
+  roundRect(ctx, x, y, w, h, 6);
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, x, y, w, h, 6);
+  ctx.stroke();
+  // Title
+  ctx.fillStyle = color;
+  ctx.font = 'bold 13px Arial';
+  ctx.fillText(title, x + 12, y + 22);
+  // Subtitle (multiline)
+  if (subtitle) {
+    ctx.fillStyle = COLORS.lightText;
+    ctx.font = '11px Arial';
+    const lines = subtitle.split('\n');
+    lines.forEach((line, i) => {
+      ctx.fillText(line, x + 12, y + 40 + i * 15);
+    });
+  }
+}
+
+function drawArrow(ctx, x1, y1, x2, y2, color) {
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  // Arrowhead
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - 10 * Math.cos(angle - 0.4), y2 - 10 * Math.sin(angle - 0.4));
+  ctx.lineTo(x2 - 10 * Math.cos(angle + 0.4), y2 - 10 * Math.sin(angle + 0.4));
+  ctx.closePath();
+  ctx.fill();
+}
+</script>
+</body>
+</html>

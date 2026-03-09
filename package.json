@@ -1,0 +1,21 @@
+{
+  "name": "openfang-aws-deploy",
+  "version": "1.0.0",
+  "description": "CDK project for deploying OpenFang on AWS EC2 with Bedrock via LiteLLM proxy",
+  "scripts": {
+    "build": "tsc",
+    "synth": "cdk synth",
+    "deploy": "cdk deploy",
+    "destroy": "cdk destroy",
+    "diff": "cdk diff"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "~5.7.0",
+    "aws-cdk": "^2.180.0"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.180.0",
+    "constructs": "^10.4.0"
+  }
+}

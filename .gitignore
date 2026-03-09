@@ -1,0 +1,12 @@
+node_modules/
+cdk.out/
+cdk.context.json
+*.js
+*.d.ts
+!jest.config.js
+*.gz
+.env
+openfang-aws-architecture.png
+researcher-report-*.md
+researcher-report-*.txt
+linkedin-blog.md
