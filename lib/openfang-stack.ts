@@ -291,11 +291,11 @@ export class OpenFangStack extends cdk.Stack {
         "aws ssm start-session",
         `--target ${instance.instanceId}`,
         "--document-name AWS-StartPortForwardingSession",
-        `--parameters '{"portNumber":["4200"],"localPortNumber":["4200"]}'`,
+        `--parameters '{"portNumber":["50051"],"localPortNumber":["50051"]}'`,
         `--region ${this.region}`,
       ].join(" "),
       description:
-        "Command to port-forward OpenFang dashboard to localhost:4200",
+        "Command to port-forward OpenFang WebChat UI to localhost:50051",
     });
 
     new cdk.CfnOutput(this, "BedrockVpcEndpointId", {

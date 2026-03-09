@@ -92,72 +92,117 @@ After deployment, the stack outputs the instance ID and ready-to-use commands.
 aws ssm start-session --target i-0123456789abcdef0 --region us-west-2
 ```
 
-### Port Forward (access OpenFang dashboard locally)
+### Port Forward (access OpenFang WebChat UI locally)
+
+OpenFang exposes two ports: **4200** (OFP binary protocol) and **50051** (HTTP API + WebChat UI). To access the WebChat UI in your browser, forward port 50051:
 
 ```bash
 aws ssm start-session \
   --target i-0123456789abcdef0 \
   --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["4200"],"localPortNumber":["4200"]}' \
+  --parameters '{"portNumber":["50051"],"localPortNumber":["50051"]}' \
   --region us-west-2
 ```
 
-Then open `http://localhost:4200` in your browser.
+Then open `http://localhost:50051` in your browser.
 
-## Checking OpenFang Status
+> **Note:** Port 50051 is bound to localhost inside the container. The port forward via SSM tunnels through Docker's proxy, which connects to the container's internal loopback. Port 4200 (OFP) is for programmatic agent-to-agent communication, not for browser access.
 
-Once connected via SSM:
+## Interacting with OpenFang
+
+OpenFang runs two servers inside the container:
+
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 4200 | OFP (binary) | Agent-to-agent communication |
+| 50051 | HTTP + WebSocket | REST API + WebChat UI |
+
+### Method 1: WebChat UI (Browser)
+
+The easiest way to interact. Set up an SSM port forward to port 50051, then open `http://localhost:50051` in your browser. The WebChat UI supports real-time streaming via WebSocket.
+
+### Method 2: REST API (curl)
+
+All API calls require the `Authorization: Bearer <api_key>` header. Get the key from `/opt/openfang/.env` on the instance.
 
 ```bash
-# Go to deployment directory
+# SSM into the instance first
+cd /opt/openfang
+source .env
+
+# Check health
+docker compose exec openfang curl -s \
+  -H "Authorization: Bearer ${OF_API_KEY}" \
+  http://127.0.0.1:50051/api/health
+
+# List available hands
+docker compose exec openfang curl -s \
+  -H "Authorization: Bearer ${OF_API_KEY}" \
+  http://127.0.0.1:50051/api/hands | python3 -m json.tool
+
+# Activate the Researcher Hand (already done by UserData)
+docker compose exec openfang curl -s -X POST \
+  -H "Authorization: Bearer ${OF_API_KEY}" \
+  http://127.0.0.1:50051/api/hands/researcher/activate
+
+# List running agents
+docker compose exec openfang curl -s \
+  -H "Authorization: Bearer ${OF_API_KEY}" \
+  http://127.0.0.1:50051/api/agents | python3 -m json.tool
+
+# Send a research query (replace AGENT_ID from the agents list above)
+docker compose exec openfang curl -s -X POST \
+  -H "Authorization: Bearer ${OF_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What are the latest developments in AI agent frameworks?"}' \
+  http://127.0.0.1:50051/api/agents/AGENT_ID/message
+```
+
+### Method 3: WebSocket (real-time streaming)
+
+For real-time agent responses, connect via WebSocket:
+
+```
+ws://127.0.0.1:50051/api/agents/{agent_id}/ws
+```
+
+### Checking Status
+
+```bash
 cd /opt/openfang
 
 # Check container status
 docker compose ps
 
-# View logs
+# View logs (both containers)
 docker compose logs -f
 
 # Check LiteLLM health
-curl http://localhost:4000/health
+curl http://localhost:4000/health/liveliness
 
 # Get OpenFang API key
 cat /opt/openfang/.env
-
-# Check OpenFang API (replace KEY with value from .env)
-curl -H "Authorization: Bearer KEY" http://localhost:4200/api/health
 ```
 
-## Testing the Researcher Hand
+## Available Hands
 
-```bash
-cd /opt/openfang
+| Hand | Category | Description | Requirements |
+|------|----------|-------------|--------------|
+| Researcher | Productivity | Deep research with cross-referencing and structured reports | None (ready) |
+| Collector | Data | Continuous intelligence monitoring with change detection | None (ready) |
+| Lead | Data | Autonomous lead generation and enrichment | None (ready) |
+| Predictor | Data | Calibrated predictions with reasoning chains | None (ready) |
+| Browser | Productivity | Autonomous web navigation and task completion | Chromium |
+| Clip | Content | Video-to-short-clip conversion with captions | FFmpeg, yt-dlp |
+| Twitter | Communication | Autonomous Twitter/X management | API Bearer Token |
 
-# Enter the OpenFang container
-docker compose exec openfang /bin/sh
-
-# Check available hands
-openfang hand list
-
-# Activate Researcher Hand (may already be activated by UserData)
-openfang hand activate researcher
-
-# Check status
-openfang hand status researcher
-
-# Start an interactive research session
-openfang chat researcher
-# Try: "What are the latest developments in AI agent frameworks in 2026?"
-```
-
-The Researcher Hand will:
-1. Detect the platform (Linux) via python3
-2. Decompose the question into sub-queries
-3. Search the web (DuckDuckGo — zero config)
-4. Fetch and analyze web pages
-5. Cross-reference findings
-6. Produce a structured research report
-7. Store results in the knowledge graph
+The Researcher Hand is activated automatically during setup. It will:
+1. Decompose the question into sub-queries
+2. Search the web (DuckDuckGo — zero config)
+3. Fetch and analyze web pages
+4. Cross-reference findings across 20-30 sources
+5. Produce a structured research report
+6. Store results in the knowledge graph
 
 ## Tear Down
 

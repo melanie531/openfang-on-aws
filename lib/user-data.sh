@@ -44,6 +44,7 @@ LITELLM_KEY=$(openssl rand -hex 32)
 # -- 5. LiteLLM config --------------------------------------------
 cat > litellm_config.yaml << LITELLM_EOF
 model_list:
+  # With bedrock/ prefix (how config.toml references them)
   - model_name: "bedrock/anthropic.claude-sonnet-4-6"
     litellm_params:
       model: "bedrock/us.anthropic.claude-sonnet-4-6"
@@ -57,6 +58,23 @@ model_list:
       model: "bedrock/us.amazon.nova-pro-v1:0"
       aws_region_name: "__BEDROCK_REGION__"
   - model_name: "bedrock/amazon.nova-lite-v1:0"
+    litellm_params:
+      model: "bedrock/us.amazon.nova-lite-v1:0"
+      aws_region_name: "__BEDROCK_REGION__"
+  # Without bedrock/ prefix (how OpenFang agents request them)
+  - model_name: "anthropic.claude-sonnet-4-6"
+    litellm_params:
+      model: "bedrock/us.anthropic.claude-sonnet-4-6"
+      aws_region_name: "__BEDROCK_REGION__"
+  - model_name: "anthropic.claude-haiku-4-5-20251001"
+    litellm_params:
+      model: "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0"
+      aws_region_name: "__BEDROCK_REGION__"
+  - model_name: "amazon.nova-pro-v1:0"
+    litellm_params:
+      model: "bedrock/us.amazon.nova-pro-v1:0"
+      aws_region_name: "__BEDROCK_REGION__"
+  - model_name: "amazon.nova-lite-v1:0"
     litellm_params:
       model: "bedrock/us.amazon.nova-lite-v1:0"
       aws_region_name: "__BEDROCK_REGION__"
@@ -89,6 +107,7 @@ services:
     build: ./source
     ports:
       - "127.0.0.1:4200:4200"
+      - "127.0.0.1:50051:50051"
     volumes:
       - openfang-data:/data
       - ./config.toml:/data/config.toml:ro
@@ -132,12 +151,26 @@ OF_API_KEY=${OF_API_KEY}
 ENV_EOF
 chmod 600 /opt/openfang/.env
 
-# -- 10. Activate Researcher Hand (after containers are healthy) ---
-echo "Waiting for OpenFang container to be ready..."
+# -- 10. Install curl in OpenFang container (for API access) ------
+echo "Installing curl in OpenFang container..."
+docker compose exec -T openfang apt-get update -qq
+docker compose exec -T openfang apt-get install -y -qq curl
+
+# -- 11. Activate Researcher Hand (after containers are healthy) ---
+# The OpenFang HTTP API listens on port 50051 inside the container.
+# The CLI's 'hand activate' doesn't forward auth correctly, so we
+# use the HTTP API directly with the generated API key.
+echo "Waiting for OpenFang API to be ready..."
 for i in $(seq 1 60); do
-  if docker compose exec -T openfang openfang hand list >/dev/null 2>&1; then
-    echo "OpenFang is ready."
-    docker compose exec -T openfang openfang hand activate researcher || true
+  HEALTH=$(docker compose exec -T openfang curl -sf \
+    -H "Authorization: Bearer ${OF_API_KEY}" \
+    http://127.0.0.1:50051/api/health 2>/dev/null || true)
+  if echo "${HEALTH}" | grep -q '"ok"'; then
+    echo "OpenFang API is ready."
+    docker compose exec -T openfang curl -sf -X POST \
+      -H "Authorization: Bearer ${OF_API_KEY}" \
+      http://127.0.0.1:50051/api/hands/researcher/activate || true
+    echo "Researcher Hand activated."
     break
   fi
   echo "  attempt ${i}/60 -- waiting 10s..."
