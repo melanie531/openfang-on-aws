@@ -104,7 +104,7 @@ services:
           memory: 2G
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-v1.65.0
+    image: ghcr.io/berriai/litellm:main-stable
     ports:
       - "127.0.0.1:4000:4000"
     volumes:
