@@ -47,19 +47,19 @@ model_list:
   - model_name: "bedrock/anthropic.claude-sonnet-4-6"
     litellm_params:
       model: "bedrock/us.anthropic.claude-sonnet-4-6"
-      aws_region_name: "us-west-2"
+      aws_region_name: "__BEDROCK_REGION__"
   - model_name: "bedrock/anthropic.claude-haiku-4-5-20251001"
     litellm_params:
       model: "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0"
-      aws_region_name: "us-west-2"
+      aws_region_name: "__BEDROCK_REGION__"
   - model_name: "bedrock/amazon.nova-pro-v1:0"
     litellm_params:
       model: "bedrock/us.amazon.nova-pro-v1:0"
-      aws_region_name: "us-west-2"
+      aws_region_name: "__BEDROCK_REGION__"
   - model_name: "bedrock/amazon.nova-lite-v1:0"
     litellm_params:
       model: "bedrock/us.amazon.nova-lite-v1:0"
-      aws_region_name: "us-west-2"
+      aws_region_name: "__BEDROCK_REGION__"
 
 general_settings:
   master_key: "${LITELLM_KEY}"
@@ -111,7 +111,7 @@ services:
       - ./litellm_config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
-      - AWS_DEFAULT_REGION=us-west-2
+      - AWS_DEFAULT_REGION=__BEDROCK_REGION__
       - LITELLM_MASTER_KEY=${LITELLM_KEY}
     restart: unless-stopped
     deploy:

@@ -36,12 +36,14 @@ This document describes the architecture for deploying OpenFang Agent OS (v0.1.0
 
 - **Docker-based deployment** on EC2 (simpler than bare-metal, matches upstream Dockerfile)
 - **LiteLLM proxy sidecar** to bridge OpenFang's OpenAI-compatible driver to Bedrock's SigV4 API (see [Section 10](#10-bedrock-integration-via-litellm-proxy) for why this is needed)
-- **Private subnet** with NAT instance (not NAT Gateway) for cost savings
+- **Bedrock Runtime VPC Endpoint (PrivateLink)** — Bedrock API traffic stays within the AWS network, never traversing the public internet or NAT Gateway
+- **NAT Gateway** — for non-Bedrock internet access (web searches, git, Docker Hub)
+- **Private subnet** with no public IP for the EC2 instance
 - **SSM Session Manager** for secure access (no SSH keys, no bastion host, no open ports)
 - **Instance profile** for Bedrock auth (no static AWS credentials)
 - **DuckDuckGo** as zero-config web search provider for Researcher Hand
 
-**Estimated monthly cost: ~$45–55** (excluding Bedrock token usage).
+**Estimated monthly cost: ~$102/month** (excluding Bedrock token usage).
 
 ---
 
@@ -137,50 +139,44 @@ The systemd service file shows the expected security profile:
 ## 3. AWS Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        AWS Region: us-west-2                        │
-│                                                                     │
-│  ┌───────────────────────────────────────────────────────────────┐  │
-│  │                    VPC: 10.0.0.0/16                           │  │
-│  │                                                               │  │
-│  │  ┌─────────────────────────┐  ┌────────────────────────────┐  │  │
-│  │  │  Public Subnet          │  │  Private Subnet             │  │  │
-│  │  │  10.0.1.0/24 (AZ-a)    │  │  10.0.10.0/24 (AZ-a)       │  │  │
-│  │  │                         │  │                              │  │  │
-│  │  │  ┌──────────────────┐   │  │  ┌────────────────────────┐ │  │  │
-│  │  │  │  NAT Instance    │   │  │  │  EC2: OpenFang         │ │  │  │
-│  │  │  │  (t3.micro)      │   │  │  │  (t3.medium)           │ │  │  │
-│  │  │  │  EIP attached    │◄──┼──┼──│                        │ │  │  │
-│  │  │  └──────────────────┘   │  │  │  ┌──────────────────┐  │ │  │  │
-│  │  │          │              │  │  │  │ Docker           │  │ │  │  │
-│  │  │          │              │  │  │  │                  │  │ │  │  │
-│  │  │          ▼              │  │  │  │ ┌──────────────┐ │  │ │  │  │
-│  │  │  ┌──────────────────┐   │  │  │  │ │ OpenFang     │ │  │ │  │  │
-│  │  │  │  Internet GW     │   │  │  │  │ │ :4200        │ │  │ │  │  │
-│  │  │  │  (IGW)           │   │  │  │  │ └──────────────┘ │  │ │  │  │
-│  │  │  └──────────────────┘   │  │  │  │ ┌──────────────┐ │  │ │  │  │
-│  │  │          │              │  │  │  │ │ LiteLLM      │ │  │ │  │  │
-│  │  │          ▼              │  │  │  │ │ Proxy :4000  │ │  │ │  │  │
-│  │  │     Internet            │  │  │  │ └──────────────┘ │  │ │  │  │
-│  │  │                         │  │  │  └──────────────────┘  │ │  │  │
-│  │  └─────────────────────────┘  │  │                        │ │  │  │
-│  │                               │  │  IAM Instance Profile  │ │  │  │
-│  │                               │  │  → Bedrock InvokeModel │ │  │  │
-│  │                               │  │  → SSM Managed         │ │  │  │
-│  │                               │  └────────────────────────┘ │  │  │
-│  │                               └────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────────────────┘  │
-│                                                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐  │
-│  │ SSM Endpoint │  │ Bedrock      │  │ VPC Endpoints (optional) │  │
-│  │ (for access) │  │ Runtime API  │  │ ssm, ssmmessages, ec2msg │  │
-│  └──────────────┘  └──────────────┘  └──────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          AWS Region                                      │
+│                                                                          │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │                      VPC: 10.0.0.0/16                              │  │
+│  │                                                                    │  │
+│  │  ┌──────────────────────┐  ┌────────────────────────────────────┐  │  │
+│  │  │  Public Subnet       │  │  Private Subnet                    │  │  │
+│  │  │                      │  │                                    │  │  │
+│  │  │  ┌────────────────┐  │  │  ┌──────────────────────────────┐ │  │  │
+│  │  │  │  NAT Gateway   │  │  │  │  EC2: OpenFang (t3.xlarge)   │ │  │  │
+│  │  │  │  (managed)     │◄─┼──┼──│                              │ │  │  │
+│  │  │  └───────┬────────┘  │  │  │  ┌────────┐  ┌────────────┐ │ │  │  │
+│  │  │          │           │  │  │  │OpenFang│→ │ LiteLLM    │ │ │  │  │
+│  │  │  ┌───────▼────────┐  │  │  │  │ :4200  │  │ Proxy :4000│ │ │  │  │
+│  │  │  │  Internet GW   │  │  │  │  └────────┘  └─────┬──────┘ │ │  │  │
+│  │  │  └───────┬────────┘  │  │  │                     │        │ │  │  │
+│  │  │          │           │  │  └─────────────────────│────────┘ │  │  │
+│  │  └──────────│───────────┘  │                        │          │  │  │
+│  │             │              │                        │          │  │  │
+│  │             ▼              │  ┌─────────────────────▼────────┐ │  │  │
+│  │        Internet            │  │  VPC Endpoint (PrivateLink)  │ │  │  │
+│  │   (web_search, web_fetch)  │  │  bedrock-runtime             │ │  │  │
+│  │                            │  │  Private DNS enabled         │ │  │  │
+│  │                            │  └─────────────────────┬────────┘ │  │  │
+│  │                            └────────────────────────│──────────┘  │  │
+│  └─────────────────────────────────────────────────────│────────────┘  │
+│                                                        │              │
+│                                        ┌───────────────▼────────────┐ │
+│                                        │  Amazon Bedrock Runtime    │ │
+│                                        │  (stays within AWS network)│ │
+│                                        └────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────┘
 
 Data Flow:
   User → SSM Session Manager → Port Forward → localhost:4200 → OpenFang
-  OpenFang → LiteLLM (:4000) → NAT → Bedrock Runtime API (us-west-2)
-  OpenFang → NAT → Internet (web_search, web_fetch for Researcher Hand)
+  OpenFang → LiteLLM (:4000) → VPC Endpoint → Bedrock Runtime (PrivateLink)
+  OpenFang → NAT Gateway → Internet (web_search, web_fetch for Researcher Hand)
 ```
 
 ---
@@ -213,18 +209,34 @@ Single-AZ is acceptable for dev/test. For production, add a second AZ.
 | `10.0.0.0/16` | local | VPC internal |
 | `0.0.0.0/0` | eni-xxx (NAT instance) | Outbound via NAT |
 
-### 4.3 VPC Endpoints (Optional — Cost Optimization)
+### 4.3 VPC Endpoints
 
-For reducing NAT traffic costs, consider VPC Interface Endpoints:
+#### Bedrock Runtime VPC Endpoint (Implemented)
+
+The stack creates a VPC Interface Endpoint for Bedrock Runtime with PrivateLink:
+
+| Property | Value |
+|----------|-------|
+| **Service** | `com.amazonaws.{region}.bedrock-runtime` |
+| **Type** | Interface (PrivateLink) |
+| **Private DNS** | Enabled — resolves `bedrock-runtime.{region}.amazonaws.com` to endpoint ENIs |
+| **Subnets** | Both private subnets |
+| **Security Group** | Dedicated SG allowing inbound HTTPS from EC2 SG only |
+| **Cost** | ~$7.30/month + $0.01/GB data processed |
+
+With private DNS enabled, LiteLLM's boto3 client automatically resolves the Bedrock hostname to the VPC endpoint's private IP addresses. No application-level changes are needed — Bedrock traffic is transparently routed through PrivateLink.
+
+#### Optional Additional Endpoints
+
+For further reducing NAT traffic, consider adding:
 
 | Endpoint | Service | Benefit |
 |----------|---------|---------|
-| `com.amazonaws.us-west-2.ssm` | SSM | Free SSM access without NAT |
-| `com.amazonaws.us-west-2.ssmmessages` | SSM Messages | Required for Session Manager |
-| `com.amazonaws.us-west-2.ec2messages` | EC2 Messages | Required for SSM |
-| `com.amazonaws.us-west-2.bedrock-runtime` | Bedrock | Bedrock calls without NAT |
+| `com.amazonaws.{region}.ssm` | SSM | SSM access without NAT |
+| `com.amazonaws.{region}.ssmmessages` | SSM Messages | Session Manager without NAT |
+| `com.amazonaws.{region}.ec2messages` | EC2 Messages | SSM without NAT |
 
-**Note:** VPC Interface Endpoints cost ~$7.30/month each. For dev/test, using NAT for everything is simpler and cheaper than 4 endpoints ($29.20/month). Add endpoints for production.
+These are optional — SSM currently works through the NAT Gateway.
 
 ---
 
@@ -336,7 +348,7 @@ Attach: `AmazonSSMManagedInstanceCore` only.
 
 ## 7. Security Groups
 
-### 7.1 OpenFang EC2 Security Group: `openfang-ec2-sg`
+### 7.1 OpenFang EC2 Security Group: `OpenFangSg`
 
 **Inbound Rules:**
 
@@ -350,30 +362,26 @@ SSM Session Manager does not require any inbound security group rules. It uses a
 
 | Rule # | Type | Protocol | Port | Destination | Description |
 |--------|------|----------|------|-------------|-------------|
-| 1 | HTTPS | TCP | 443 | `0.0.0.0/0` | Bedrock API, web_search, web_fetch (HTTPS), SSM |
+| 1 | HTTPS | TCP | 443 | `0.0.0.0/0` | SSM, web_search, web_fetch (via NAT) + Bedrock (via VPC endpoint) |
 | 2 | HTTP | TCP | 80 | `0.0.0.0/0` | web_fetch (some sites are HTTP-only) |
 | 3 | DNS | UDP | 53 | `0.0.0.0/0` | DNS resolution |
 | 4 | DNS | TCP | 53 | `0.0.0.0/0` | DNS resolution (TCP fallback) |
 
-### 7.2 NAT Instance Security Group: `openfang-nat-sg`
+### 7.2 Bedrock VPC Endpoint Security Group: `BedrockEndpointSg`
 
 **Inbound Rules:**
 
 | Rule # | Type | Protocol | Port | Source | Description |
 |--------|------|----------|------|--------|-------------|
-| 1 | HTTPS | TCP | 443 | `10.0.10.0/24` | From private subnet |
-| 2 | HTTP | TCP | 80 | `10.0.10.0/24` | From private subnet |
-| 3 | DNS | UDP | 53 | `10.0.10.0/24` | DNS from private subnet |
-| 4 | DNS | TCP | 53 | `10.0.10.0/24` | DNS from private subnet (TCP fallback) |
+| 1 | HTTPS | TCP | 443 | `OpenFangSg` | Allow HTTPS from OpenFang EC2 instance |
 
 **Outbound Rules:**
 
 | Rule # | Type | Protocol | Port | Destination | Description |
 |--------|------|----------|------|-------------|-------------|
-| 1 | HTTPS | TCP | 443 | `0.0.0.0/0` | Forward HTTPS to internet |
-| 2 | HTTP | TCP | 80 | `0.0.0.0/0` | Forward HTTP to internet |
-| 3 | DNS | UDP | 53 | `0.0.0.0/0` | DNS resolution |
-| 4 | DNS | TCP | 53 | `0.0.0.0/0` | DNS resolution (TCP fallback) |
+| — | — | — | — | — | **No outbound rules** (endpoint SG does not initiate traffic) |
+
+This security group restricts the VPC endpoint to only accept traffic from the OpenFang EC2 instance, preventing other resources in the VPC from using the endpoint.
 
 ---
 
@@ -531,21 +539,25 @@ general_settings:
 ```
 OpenFang (OpenAI driver)
     │ POST /v1/chat/completions
-    │ Authorization: Bearer sk-litellm-openfang-internal
+    │ Authorization: Bearer <auto-generated-key>
     ▼
-LiteLLM Proxy (:4000)
+LiteLLM Proxy (:4000, Docker network)
     │ Reads instance profile via IMDS (169.254.169.254)
     │ Signs request with SigV4 (boto3 credential chain)
-    │ POST /model/anthropic.claude-sonnet-4-6-v1/invoke
+    │ POST to bedrock-runtime.{region}.amazonaws.com
     ▼
-Bedrock Runtime API (bedrock-runtime.us-west-2.amazonaws.com)
+VPC Endpoint (PrivateLink)
+    │ Private DNS resolves hostname to endpoint ENIs
+    │ Traffic stays within AWS network (never hits NAT/internet)
+    ▼
+Bedrock Runtime API
     │ Validates SigV4 signature against IAM role
     │ Invokes model
     ▼
 Response flows back through the chain
 ```
 
-No static AWS credentials anywhere. The EC2 instance profile provides rotating temporary credentials via IMDS.
+No static AWS credentials anywhere. The EC2 instance profile provides rotating temporary credentials via IMDS. The VPC endpoint with private DNS ensures Bedrock traffic never leaves the AWS network.
 
 ### 10.4 Alternative: Direct Anthropic API
 
@@ -1011,6 +1023,8 @@ This is critical for LiteLLM to obtain Bedrock credentials from the instance pro
 3. **Auto Scaling** — for production, wrap in ASG with health checks
 4. **ALB + WAF** — if exposing API to team (not just SSM port forward)
 5. **Secrets Manager** — rotate OpenFang API key automatically
-6. **Bedrock VPC Endpoint** — eliminate NAT traffic for Bedrock calls
-7. **Multi-AZ** — NAT Gateway + second subnet for HA
-8. **Graviton/ARM** — t4g.medium for ~20% cost savings (requires ARM Rust build)
+6. **SSM VPC Endpoints** — eliminate NAT dependency for SSM Session Manager
+7. **Multi-AZ** — second set of private subnets for HA
+8. **Graviton/ARM** — t4g instances for ~20% cost savings (requires ARM Rust build)
+
+> **Note:** Bedrock VPC Endpoint (PrivateLink) is already implemented — see [Section 4.3](#43-vpc-endpoints).

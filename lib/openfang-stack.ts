@@ -20,7 +20,7 @@ export class OpenFangStack extends cdk.Stack {
     const instanceType =
       (this.node.tryGetContext("instanceType") as string) ?? "t3.xlarge";
     const bedrockRegion =
-      (this.node.tryGetContext("bedrockRegion") as string) ?? "us-west-2";
+      (this.node.tryGetContext("bedrockRegion") as string) ?? this.region;
 
     // ── Alert email parameter ────────────────────────────────────
     const alertEmailParam = new cdk.CfnParameter(this, "AlertEmail", {
@@ -86,11 +86,11 @@ export class OpenFangStack extends cdk.Stack {
       allowAllOutbound: false,
     });
 
-    // Outbound: HTTPS (Bedrock, SSM, web_search, web_fetch)
+    // Outbound: HTTPS (SSM, web_search, web_fetch via NAT; Bedrock via VPC endpoint)
     sg.addEgressRule(
       ec2.Peer.anyIpv4(),
       ec2.Port.tcp(443),
-      "HTTPS - Bedrock SSM web_search web_fetch"
+      "HTTPS - SSM web_search web_fetch (NAT) and Bedrock (VPC endpoint)"
     );
 
     // Outbound: HTTP (some web_fetch targets)
@@ -110,6 +110,40 @@ export class OpenFangStack extends cdk.Stack {
       ec2.Peer.anyIpv4(),
       ec2.Port.tcp(53),
       "DNS resolution (TCP)"
+    );
+
+    // ── Bedrock Runtime VPC Endpoint (PrivateLink) ─────────────────
+    // Bedrock API calls route through PrivateLink within the AWS
+    // network — never traversing the public internet or NAT Gateway.
+    // Private DNS resolves bedrock-runtime.{region}.amazonaws.com to
+    // the endpoint ENIs, so no application-level changes are needed.
+    const bedrockEndpointSg = new ec2.SecurityGroup(
+      this,
+      "BedrockEndpointSg",
+      {
+        vpc,
+        description:
+          "Bedrock Runtime VPC endpoint - allows HTTPS from OpenFang EC2",
+        allowAllOutbound: false,
+      }
+    );
+
+    bedrockEndpointSg.addIngressRule(
+      sg,
+      ec2.Port.tcp(443),
+      "HTTPS from OpenFang EC2 instance"
+    );
+
+    const bedrockEndpoint = new ec2.InterfaceVpcEndpoint(
+      this,
+      "BedrockRuntimeEndpoint",
+      {
+        vpc,
+        service: new ec2.InterfaceVpcEndpointAwsService("bedrock-runtime"),
+        privateDnsEnabled: true,
+        subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [bedrockEndpointSg],
+      }
     );
 
     // ── IAM Role ───────────────────────────────────────────────────
@@ -147,10 +181,9 @@ export class OpenFangStack extends cdk.Stack {
 
     // ── EC2 Instance ───────────────────────────────────────────────
     const userData = ec2.UserData.forLinux();
-    const userDataScript = fs.readFileSync(
-      path.join(__dirname, "user-data.sh"),
-      "utf8"
-    );
+    const userDataScript = fs
+      .readFileSync(path.join(__dirname, "user-data.sh"), "utf8")
+      .replace(/__BEDROCK_REGION__/g, bedrockRegion);
     userData.addCommands(userDataScript);
 
     const instance = new ec2.Instance(this, "OpenFangInstance", {
@@ -175,6 +208,9 @@ export class OpenFangStack extends cdk.Stack {
       requireImdsv2: true,
       propagateTagsToVolumeOnCreation: true,
     });
+
+    // Ensure VPC endpoint is ready before EC2 user-data calls Bedrock
+    instance.node.addDependency(bedrockEndpoint);
 
     // Set IMDSv2 hop limit to 2 for Docker container metadata access
     const cfnInstance = instance.node.defaultChild as ec2.CfnInstance;
@@ -260,6 +296,12 @@ export class OpenFangStack extends cdk.Stack {
       ].join(" "),
       description:
         "Command to port-forward OpenFang dashboard to localhost:4200",
+    });
+
+    new cdk.CfnOutput(this, "BedrockVpcEndpointId", {
+      value: bedrockEndpoint.vpcEndpointId,
+      description:
+        "Bedrock Runtime VPC endpoint ID (PrivateLink, no public internet)",
     });
 
     if (!existingVpcId) {

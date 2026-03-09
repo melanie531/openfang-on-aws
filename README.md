@@ -5,19 +5,33 @@ Deploy [OpenFang](https://github.com/RightNow-AI/openfang) Agent OS on AWS EC2 w
 ## Architecture
 
 ```
-Private Subnet (EC2 t3.medium)
-┌──────────────────────────────────┐
-│  Docker                          │
-│  ┌────────────┐  ┌────────────┐  │
-│  │ OpenFang   │→ │ LiteLLM    │──│──→ NAT Gateway → Bedrock Runtime API
-│  │ :4200      │  │ Proxy :4000│  │
-│  └────────────┘  └────────────┘  │
-└──────────────────────────────────┘
-         ↑ SSM Session Manager (no SSH, no open ports)
+┌─────────────────────────────────────────────────────────────────────┐
+│  VPC (10.0.0.0/16)                                                  │
+│                                                                     │
+│  Private Subnet (EC2 t3.xlarge)                                     │
+│  ┌──────────────────────────────────┐                               │
+│  │  Docker                          │                               │
+│  │  ┌────────────┐  ┌────────────┐  │   VPC Endpoint (PrivateLink)  │
+│  │  │ OpenFang   │→ │ LiteLLM    │──│──→ bedrock-runtime ──→ Bedrock│
+│  │  │ :4200      │  │ Proxy :4000│  │   (never leaves AWS network)  │
+│  │  └────────────┘  └────────────┘  │                               │
+│  │       │                          │                               │
+│  └───────│──────────────────────────┘                               │
+│          │  web_search, web_fetch                                   │
+│          └──→ NAT Gateway ──→ Internet                              │
+│                                                                     │
+│  ↑ SSM Session Manager (no SSH, no open ports)                      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
+**Traffic routing:**
+- **Bedrock API calls** → VPC Interface Endpoint (PrivateLink) — stays within AWS network
+- **Web searches, git, Docker Hub** → NAT Gateway → Public internet
+
+**Key components:**
 - **OpenFang** — Agent OS with Researcher Hand (autonomous deep research)
 - **LiteLLM proxy** — Translates OpenAI-compatible API calls to Bedrock with SigV4 signing
+- **Bedrock VPC Endpoint** — PrivateLink with private DNS; Bedrock traffic never traverses the public internet
 - **IAM instance profile** — No static AWS credentials; rotating temp creds via IMDS
 - **SSM Session Manager** — Zero inbound ports; shell + port forwarding over HTTPS
 
@@ -26,7 +40,7 @@ Private Subnet (EC2 t3.medium)
 1. **Node.js** >= 18
 2. **AWS CDK CLI**: `npm install -g aws-cdk`
 3. **AWS credentials** configured (`aws configure` or env vars) with permissions to create VPC, EC2, IAM resources
-4. **CDK bootstrapped** in target account/region: `cdk bootstrap aws://ACCOUNT_ID/us-west-2`
+4. **CDK bootstrapped** in target account/region: `cdk bootstrap aws://ACCOUNT_ID/REGION`
 5. **SSM Session Manager plugin** installed on your workstation ([install guide](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html))
 
 ## Quick Start
@@ -37,7 +51,7 @@ npm install
 
 ### Mode 1: Create New VPC (default)
 
-Creates a full VPC with public/private subnets, NAT Gateway, and the OpenFang EC2 instance.
+Creates a full VPC with public/private subnets, NAT Gateway, Bedrock Runtime VPC Endpoint, and the OpenFang EC2 instance.
 
 ```bash
 npx cdk deploy
@@ -45,7 +59,7 @@ npx cdk deploy
 
 ### Mode 2: Use Existing VPC
 
-Reuses an existing VPC (and its NAT Gateway/subnets). Only creates EC2 + IAM + Security Group.
+Reuses an existing VPC (and its NAT Gateway/subnets). Creates EC2 + IAM + Security Groups + Bedrock VPC Endpoint.
 
 ```bash
 npx cdk deploy -c vpcId=vpc-0123456789abcdef0
@@ -56,8 +70,8 @@ npx cdk deploy -c vpcId=vpc-0123456789abcdef0
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `vpcId` | _(none — creates new)_ | Existing VPC ID to reuse |
-| `instanceType` | `t3.medium` | EC2 instance type |
-| `bedrockRegion` | `us-west-2` | AWS region for Bedrock model access |
+| `instanceType` | `t3.xlarge` | EC2 instance type |
+| `bedrockRegion` | _(stack region)_ | AWS region for Bedrock model access |
 
 Example with all options:
 
@@ -159,21 +173,23 @@ This removes all AWS resources created by the stack. If you used Mode 1 (new VPC
 
 | Component | Spec | Monthly Cost |
 |-----------|------|-------------|
-| EC2 — OpenFang | t3.medium on-demand | ~$30 |
+| EC2 — OpenFang | t3.xlarge on-demand | ~$60 |
 | NAT Gateway | Standard | ~$32 |
 | NAT Gateway data | ~5 GB estimate | ~$0.25 |
+| VPC Endpoint | Bedrock Runtime (PrivateLink) | ~$7.30 |
 | EBS | 30 GB gp3, encrypted | ~$2.40 |
 | SSM Session Manager | — | Free |
-| **Subtotal** | | **~$65/month** |
+| **Subtotal** | | **~$102/month** |
 
 ### Fixed Monthly Costs (Mode 2 — Existing VPC)
 
 | Component | Spec | Monthly Cost |
 |-----------|------|-------------|
-| EC2 — OpenFang | t3.medium on-demand | ~$30 |
+| EC2 — OpenFang | t3.xlarge on-demand | ~$60 |
+| VPC Endpoint | Bedrock Runtime (PrivateLink) | ~$7.30 |
 | EBS | 30 GB gp3, encrypted | ~$2.40 |
 | SSM Session Manager | — | Free |
-| **Subtotal** | | **~$33/month** |
+| **Subtotal** | | **~$70/month** |
 
 ### Bedrock Token Costs (Variable)
 
@@ -195,12 +211,14 @@ Light testing (~10 research sessions/month with Sonnet 4.6): ~$3/month in Bedroc
 ## Security
 
 - **Zero inbound ports** — security group has no inbound rules
+- **Bedrock via PrivateLink** — API calls route through VPC endpoint, never traverse the public internet
 - **SSM Session Manager** — IAM-based access, CloudTrail audit trail
 - **No SSH keys** — no key pairs created or used
 - **No static AWS credentials** — instance profile with IMDS for Bedrock auth
 - **IMDSv2 enforced** — hop limit set to 2 for Docker container access
 - **Encrypted EBS** — root volume encrypted at rest
 - **Least-privilege IAM** — only `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` for specific models
+- **VPC Flow Logs** — all network traffic logged to CloudWatch (30-day retention)
 - **OpenFang API key** — auto-generated, required for API access
 - **LiteLLM internal only** — bound to localhost, not exposed
 
@@ -211,7 +229,7 @@ openfang-aws-deploy/
 ├── bin/
 │   └── openfang-deploy.ts      # CDK app entry point
 ├── lib/
-│   ├── openfang-stack.ts       # Main stack (VPC + EC2 + IAM + SG)
+│   ├── openfang-stack.ts       # Main stack (VPC + EC2 + IAM + SG + VPC Endpoint)
 │   └── user-data.sh            # EC2 UserData bootstrap script
 ├── cdk.json                    # CDK configuration
 ├── tsconfig.json               # TypeScript configuration

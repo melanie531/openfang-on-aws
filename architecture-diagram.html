@@ -7,7 +7,7 @@
 </style>
 </head>
 <body>
-<canvas id="c" width="1200" height="800"></canvas>
+<canvas id="c" width="1200" height="850"></canvas>
 <script>
 const c = document.getElementById('c');
 const ctx = c.getContext('2d');
@@ -31,12 +31,13 @@ const COLORS = {
   text: '#263238',
   lightText: '#546E7A',
   arrow: '#607D8B',
-  sg: '#EF5350'
+  sg: '#EF5350',
+  endpoint: '#0277BD'
 };
 
 // Background
 ctx.fillStyle = COLORS.bg;
-ctx.fillRect(0, 0, 1200, 800);
+ctx.fillRect(0, 0, 1200, 850);
 
 // Title
 ctx.fillStyle = COLORS.aws;
@@ -44,22 +45,22 @@ ctx.font = 'bold 24px Arial';
 ctx.fillText('OpenFang on AWS — Secure Deployment Architecture', 30, 40);
 ctx.fillStyle = COLORS.lightText;
 ctx.font = '14px Arial';
-ctx.fillText('Amazon Bedrock + LiteLLM Proxy + SSM Session Manager | us-west-2', 30, 62);
+ctx.fillText('Amazon Bedrock via PrivateLink + LiteLLM Proxy + SSM Session Manager', 30, 62);
 
 // AWS Cloud box
 ctx.strokeStyle = COLORS.awsOrange;
 ctx.lineWidth = 3;
 ctx.setLineDash([]);
-roundRect(ctx, 20, 80, 1160, 700, 12);
+roundRect(ctx, 20, 80, 1160, 750, 12);
 ctx.stroke();
 ctx.fillStyle = COLORS.awsOrange;
 ctx.font = 'bold 14px Arial';
-ctx.fillText('☁ AWS Cloud (us-west-2)', 40, 100);
+ctx.fillText('☁ AWS Cloud', 40, 100);
 
 // VPC box
 ctx.strokeStyle = '#1565C0';
 ctx.lineWidth = 2;
-roundRect(ctx, 50, 115, 700, 640, 10);
+roundRect(ctx, 50, 115, 700, 690, 10);
 ctx.stroke();
 ctx.fillStyle = '#1565C0';
 ctx.font = 'bold 13px Arial';
@@ -67,147 +68,186 @@ ctx.fillText('VPC (10.0.0.0/16)', 70, 135);
 
 // Public Subnet
 ctx.fillStyle = COLORS.publicSub;
-roundRect(ctx, 70, 150, 310, 250, 8);
+roundRect(ctx, 70, 150, 310, 200, 8);
 ctx.fill();
 ctx.strokeStyle = '#E65100';
 ctx.lineWidth = 1.5;
-roundRect(ctx, 70, 150, 310, 250, 8);
+roundRect(ctx, 70, 150, 310, 200, 8);
 ctx.stroke();
 ctx.fillStyle = '#E65100';
 ctx.font = 'bold 12px Arial';
-ctx.fillText('Public Subnet (10.0.0.0/24)', 90, 172);
+ctx.fillText('Public Subnet', 90, 172);
 
 // NAT Gateway in public subnet
-drawBox(ctx, 120, 200, 200, 70, '#8C4FFF', 'NAT Gateway', '🌐 Outbound Internet');
+drawBox(ctx, 120, 190, 200, 60, '#8C4FFF', 'NAT Gateway', 'Outbound internet access');
 
 // Internet Gateway
-drawBox(ctx, 120, 310, 200, 55, '#E65100', 'Internet Gateway', 'igw-xxx');
+drawBox(ctx, 120, 278, 200, 50, '#E65100', 'Internet Gateway', 'igw-xxx');
 
 // Private Subnet
 ctx.fillStyle = COLORS.privateSub;
-roundRect(ctx, 70, 420, 660, 320, 8);
+roundRect(ctx, 70, 370, 660, 320, 8);
 ctx.fill();
 ctx.strokeStyle = '#2E7D32';
 ctx.lineWidth = 1.5;
-roundRect(ctx, 70, 420, 660, 320, 8);
+roundRect(ctx, 70, 370, 660, 320, 8);
 ctx.stroke();
 ctx.fillStyle = '#2E7D32';
 ctx.font = 'bold 12px Arial';
-ctx.fillText('Private Subnet (10.0.128.0/24) — No Public IP', 90, 442);
+ctx.fillText('Private Subnet — No Public IP', 90, 392);
 
 // EC2 Instance
 ctx.fillStyle = '#FFF8E1';
-roundRect(ctx, 100, 460, 600, 260, 8);
+roundRect(ctx, 100, 410, 600, 260, 8);
 ctx.fill();
 ctx.strokeStyle = COLORS.ec2;
 ctx.lineWidth = 2;
-roundRect(ctx, 100, 460, 600, 260, 8);
+roundRect(ctx, 100, 410, 600, 260, 8);
 ctx.stroke();
 ctx.fillStyle = COLORS.ec2;
 ctx.font = 'bold 13px Arial';
-ctx.fillText('EC2 t3.xlarge (16GB RAM + 4GB Swap)', 120, 483);
+ctx.fillText('EC2 t3.xlarge (16GB RAM + 4GB Swap)', 120, 433);
 ctx.fillStyle = COLORS.lightText;
 ctx.font = '11px Arial';
-ctx.fillText('Amazon Linux 2023 | IMDSv2 | gp3 Encrypted EBS', 120, 498);
+ctx.fillText('Amazon Linux 2023 | IMDSv2 | gp3 Encrypted EBS', 120, 448);
 
 // OpenFang container
-drawBox(ctx, 130, 515, 250, 85, '#7C4DFF', 'OpenFang v0.3.33', 'Agent OS + Researcher Hand\nPort 50051 | network_mode: host');
+drawBox(ctx, 130, 465, 250, 80, '#7C4DFF', 'OpenFang', 'Agent OS + Researcher Hand\nPort 4200 | localhost only');
 
 // LiteLLM container
-drawBox(ctx, 420, 515, 250, 85, '#0288D1', 'LiteLLM Proxy', 'OpenAI → Bedrock Bridge\nPort 4000 | Docker');
+drawBox(ctx, 420, 465, 250, 80, '#0288D1', 'LiteLLM Proxy', 'OpenAI → Bedrock Bridge\nPort 4000 | SigV4 signing');
 
-// Security Group
+// Security Group label
 ctx.setLineDash([6, 4]);
 ctx.strokeStyle = COLORS.sg;
 ctx.lineWidth = 1.5;
-roundRect(ctx, 95, 455, 610, 270, 6);
+roundRect(ctx, 95, 405, 610, 270, 6);
 ctx.stroke();
 ctx.setLineDash([]);
 ctx.fillStyle = COLORS.sg;
 ctx.font = '11px Arial';
-ctx.fillText('🔒 Security Group: 0 inbound rules | Outbound: 443, 80, 53 only', 120, 718);
-
-// Docker Compose label
-ctx.fillStyle = COLORS.lightText;
-ctx.font = 'italic 11px Arial';
-ctx.fillText('docker-compose.yml', 120, 628);
+ctx.fillText('🔒 Security Group: 0 inbound | Outbound: 443, 80, 53 only', 120, 668);
 
 // IAM Role
-drawBox(ctx, 130, 640, 250, 55, '#DD344C', 'IAM Instance Profile', 'Bedrock Invoke + SSM Core');
+drawBox(ctx, 130, 580, 250, 50, '#DD344C', 'IAM Instance Profile', 'Bedrock Invoke + SSM Core');
 
-// Memory/Data
-drawBox(ctx, 420, 640, 250, 55, '#6D4C41', 'Persistent Volume', 'SQLite + Agent Workspaces');
+// Persistent Volume
+drawBox(ctx, 420, 580, 250, 50, '#6D4C41', 'Persistent Volume', 'SQLite + Agent Workspaces');
+
+// ─── VPC Endpoint box (inside VPC, below private subnet) ─────
+ctx.fillStyle = '#E1F5FE';
+roundRect(ctx, 70, 710, 660, 80, 8);
+ctx.fill();
+ctx.strokeStyle = COLORS.endpoint;
+ctx.lineWidth = 2;
+roundRect(ctx, 70, 710, 660, 80, 8);
+ctx.stroke();
+ctx.fillStyle = COLORS.endpoint;
+ctx.font = 'bold 13px Arial';
+ctx.fillText('VPC Interface Endpoint (PrivateLink)', 90, 735);
+ctx.fillStyle = COLORS.lightText;
+ctx.font = '11px Arial';
+ctx.fillText('com.amazonaws.{region}.bedrock-runtime | Private DNS enabled', 90, 755);
+ctx.fillText('Bedrock traffic stays within AWS network — never traverses NAT or public internet', 90, 772);
 
 // --- Right side: AWS Services ---
 
 // Amazon Bedrock
-drawBox(ctx, 820, 140, 320, 130, '#01A88D', 'Amazon Bedrock', 'Claude Sonnet 4.6\nCross-Region Inference Profiles\nus.anthropic.claude-sonnet-4-6\nIAM Auth (Instance Profile)');
+drawBox(ctx, 820, 140, 320, 120, '#01A88D', 'Amazon Bedrock Runtime', 'Claude Sonnet 4.6 / Haiku 4.5\nCross-Region Inference Profiles\nIAM Auth (Instance Profile)');
 
 // SSM
-drawBox(ctx, 820, 310, 320, 90, '#DD344C', 'SSM Session Manager', 'Secure Shell Access\nNo SSH Keys | No Open Ports');
+drawBox(ctx, 820, 300, 320, 80, '#DD344C', 'SSM Session Manager', 'Secure Shell Access\nNo SSH Keys | No Open Ports');
 
-// CloudWatch (optional)
-drawBox(ctx, 820, 440, 320, 70, '#FF6F00', 'AWS CloudWatch', 'Logs + Metrics');
+// CloudWatch
+drawBox(ctx, 820, 420, 320, 70, '#FF6F00', 'CloudWatch', 'Alarms + VPC Flow Logs');
 
 // User/Operator
-drawBox(ctx, 820, 570, 320, 80, '#37474F', '👤 Operator', 'aws ssm start-session\nPort Forward → localhost:4200');
+drawBox(ctx, 820, 550, 320, 80, '#37474F', '👤 Operator', 'aws ssm start-session\nPort Forward → localhost:4200');
 
 // --- Arrows ---
 ctx.setLineDash([]);
 ctx.lineWidth = 2;
 
 // OpenFang → LiteLLM
-drawArrow(ctx, 380, 558, 420, 558, '#607D8B');
+drawArrow(ctx, 380, 505, 420, 505, '#607D8B');
 ctx.fillStyle = COLORS.lightText;
 ctx.font = '10px Arial';
-ctx.fillText('OpenAI API', 388, 548);
+ctx.fillText('OpenAI API', 385, 496);
 
-// LiteLLM → NAT → Bedrock
-drawArrow(ctx, 545, 515, 545, 395, '#607D8B');
-drawArrow(ctx, 545, 395, 320, 270, '#607D8B');
-drawArrow(ctx, 320, 235, 380, 235, '#607D8B');
-drawArrow(ctx, 380, 235, 820, 200, '#01A88D');
+// LiteLLM → VPC Endpoint (Bedrock path - GREEN)
+drawArrow(ctx, 545, 545, 545, 710, '#01A88D');
 ctx.fillStyle = '#01A88D';
+ctx.font = 'bold 10px Arial';
+ctx.fillText('Bedrock calls', 555, 630);
 ctx.font = '10px Arial';
-ctx.fillText('SigV4 signed requests', 550, 200);
+ctx.fillText('(PrivateLink)', 555, 643);
+
+// VPC Endpoint → Bedrock
+drawArrow(ctx, 730, 740, 820, 200, '#01A88D');
+ctx.fillStyle = '#01A88D';
+ctx.font = 'bold 10px Arial';
+ctx.fillText('SigV4 signed', 770, 440);
+ctx.font = '10px Arial';
+ctx.fillText('(private network)', 770, 453);
+
+// OpenFang → NAT (internet path - PURPLE)
+drawArrow(ctx, 255, 465, 255, 370, '#8C4FFF');
+drawArrow(ctx, 255, 370, 220, 250, '#8C4FFF');
+ctx.fillStyle = '#8C4FFF';
+ctx.font = '10px Arial';
+ctx.fillText('web_search', 195, 360);
+ctx.fillText('web_fetch', 195, 372);
 
 // NAT → IGW
-drawArrow(ctx, 220, 270, 220, 310, '#8C4FFF');
+drawArrow(ctx, 220, 250, 220, 278, '#8C4FFF');
+
+// IGW → Internet label
+ctx.fillStyle = '#E65100';
+ctx.font = 'bold 10px Arial';
+ctx.fillText('→ Internet', 330, 305);
 
 // SSM → EC2
-drawArrow(ctx, 820, 355, 700, 500, '#DD344C');
+drawArrow(ctx, 820, 345, 700, 450, '#DD344C');
 ctx.fillStyle = '#DD344C';
 ctx.font = '10px Arial';
-ctx.fillText('SSM Tunnel', 740, 420);
+ctx.fillText('SSM Tunnel', 740, 385);
 
 // Operator → SSM
-drawArrow(ctx, 980, 570, 980, 400, '#37474F');
+drawArrow(ctx, 980, 550, 980, 380, '#37474F');
 
 // IAM → Bedrock (dotted)
 ctx.setLineDash([4, 4]);
-drawArrow(ctx, 380, 667, 820, 250, '#DD344C');
+drawArrow(ctx, 380, 605, 820, 230, '#DD344C');
 ctx.setLineDash([]);
 ctx.fillStyle = '#DD344C';
 ctx.font = '10px Arial';
-ctx.fillText('IAM Auth', 600, 430);
+ctx.fillText('IAM Auth', 600, 395);
 
 // Cost estimate
 ctx.fillStyle = COLORS.aws;
 ctx.font = 'bold 12px Arial';
-ctx.fillText('Monthly Cost: ~$75-85 (excl. Bedrock tokens)', 820, 690);
+ctx.fillText('Monthly Cost: ~$102 (excl. Bedrock tokens)', 820, 670);
 ctx.fillStyle = COLORS.lightText;
 ctx.font = '11px Arial';
-ctx.fillText('EC2 t3.xlarge: ~$122 | NAT GW: ~$32 | EBS: ~$2', 820, 708);
-ctx.fillText('Consider t3.medium ($30/mo) after initial build', 820, 724);
+ctx.fillText('EC2 t3.xlarge: ~$60 | NAT GW: ~$32', 820, 688);
+ctx.fillText('VPC Endpoint: ~$7.30 | EBS: ~$2.40', 820, 704);
 
 // Legend
 ctx.fillStyle = COLORS.text;
 ctx.font = 'bold 11px Arial';
-ctx.fillText('Zero Trust:', 820, 755);
+ctx.fillText('Security:', 820, 735);
 ctx.fillStyle = COLORS.lightText;
 ctx.font = '11px Arial';
-ctx.fillText('✓ No public IP  ✓ No SSH  ✓ No API keys', 890, 755);
-ctx.fillText('✓ IMDSv2 only  ✓ 0 inbound SG rules  ✓ Encrypted EBS', 820, 772);
+ctx.fillText('✓ No public IP  ✓ No SSH  ✓ No static credentials', 880, 735);
+ctx.fillText('✓ Bedrock via PrivateLink  ✓ 0 inbound SG rules', 820, 752);
+ctx.fillText('✓ IMDSv2 only  ✓ Encrypted EBS  ✓ VPC Flow Logs', 820, 769);
+
+// Traffic legend
+ctx.fillStyle = '#01A88D';
+ctx.font = 'bold 11px Arial';
+ctx.fillText('━━ Bedrock (PrivateLink)', 820, 795);
+ctx.fillStyle = '#8C4FFF';
+ctx.fillText('━━ Internet (NAT Gateway)', 820, 812);
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
